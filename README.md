@@ -15,7 +15,39 @@ A FastAPI server that efficiently fetches user information from freelancer.com A
 
 - **Python 3.8+**
 - **MongoDB** running on localhost:27017
+- **Freelancer API Access** - Required for getting user data
 - **Internet connection** for freelancer.com API access
+
+### 🔑 Getting Freelancer API Access
+
+**IMPORTANT**: The Freelancer.com API requires authentication. Without proper credentials, the API calls will fail.
+
+#### Step 1: Apply for API Access
+1. Visit https://developers.freelancer.com/
+2. Create a developer account or log in
+3. Apply for API access (review may take a few business days)
+4. You'll receive OAuth 2.0 credentials (client ID and secret)
+
+#### Step 2: Get Authentication Token
+Choose one of these authentication methods:
+
+**Option A: OAuth Token (Recommended)**
+- Complete the OAuth 2.0 flow to get an access token
+- Provides full API access with proper permissions
+
+**Option B: Client ID (Limited)**
+- Use your application's client ID for basic requests
+- May have limited functionality compared to OAuth tokens
+
+#### Step 3: Configure Authentication
+Add your credentials to the `.env` file:
+```env
+# Option A: OAuth Token (Recommended)
+FREELANCER_OAUTH_TOKEN=your_oauth_token_here
+
+# Option B: Client ID (Alternative)  
+FREELANCER_CLIENT_ID=your_client_id_here
+```
 
 ## ⚡ Quick Start
 
@@ -123,7 +155,13 @@ Visit `http://localhost:8000/docs` for Swagger UI
 MONGODB_URL=mongodb://localhost:27017
 DATABASE_NAME=user_crawler
 
-# API Configuration
+# Freelancer API Authentication (REQUIRED)
+# Get these from https://developers.freelancer.com/
+FREELANCER_OAUTH_TOKEN=your_oauth_token_here
+# OR (alternative)
+FREELANCER_CLIENT_ID=your_client_id_here
+
+# Optional API Configuration
 FREELANCER_API_BASE=https://www.freelancer.com/api/users/0.1/users
 ```
 
@@ -182,12 +220,23 @@ Total: 5 API calls (16% reduction)
 
 ## 🧪 Testing
 
-### Basic Test
+### Test Authentication Setup
+```bash
+# Test your Freelancer API credentials
+python test_freelancer_auth.py
+```
+
+This will verify:
+- ✅ Authentication credentials are configured
+- ✅ API connection is working  
+- ✅ User data can be retrieved
+
+### Basic API Test
 ```bash
 # Health check
 curl http://localhost:8000/
 
-# Get users
+# Get users (requires valid authentication)
 curl -X POST http://localhost:8000/api/users \
   -H "Content-Type: application/json" \
   -d '{"user_ids": [88205665, 12345]}'
@@ -195,6 +244,23 @@ curl -X POST http://localhost:8000/api/users \
 # Check statistics  
 curl http://localhost:8000/api/stats
 ```
+
+### Common Authentication Errors
+
+**"Authentication not configured"**
+- Add `FREELANCER_OAUTH_TOKEN` or `FREELANCER_CLIENT_ID` to `.env` file
+
+**"Authentication failed" (401 error)**
+- Check if your OAuth token is valid and not expired
+- Verify your Client ID is correct
+
+**"Access forbidden" (403 error)**  
+- Check API permissions and rate limits
+- Ensure your account has proper access levels
+
+**"User not found" (404 error)**
+- The requested user ID doesn't exist on Freelancer
+- This is normal behavior for invalid user IDs
 
 ### Test Queue Optimization
 Send multiple concurrent requests with overlapping user IDs:
@@ -297,10 +363,31 @@ The system handles various error scenarios:
 ```json
 {
     "_id": ObjectId("..."),
-    "user_id": 88205665,
-    "username": "john_doe",
-    "country": "United States", 
+    "user_id": 87881640,
+    "username": "ankurcfc",
+    "country": "India", 
     "created_at": "2024-01-15T10:30:00Z"
+}
+```
+
+### Freelancer API Response Format
+The API returns data in this structure:
+```json
+{
+    "status": "success",
+    "result": {
+        "id": 87881640,
+        "username": "ankurcfc",
+        "location": {
+            "country": {
+                "name": "India"
+            },
+            "city": "Indore"
+        },
+        "display_name": "ankurcfc",
+        "role": "employer"
+    },
+    "request_id": "..."
 }
 ```
 
@@ -309,9 +396,9 @@ The system handles various error scenarios:
 {
     "users": [
         {
-            "user_id": 88205665,
-            "username": "john_doe",
-            "country": "United States",
+            "user_id": 87881640,
+            "username": "ankurcfc",
+            "country": "India",
             "created_at": "2024-01-15T10:30:00Z"
         }
     ],

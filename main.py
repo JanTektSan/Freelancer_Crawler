@@ -42,6 +42,11 @@ MONGODB_URL = os.getenv("MONGODB_URL", "mongodb://localhost:27017")
 DATABASE_NAME = os.getenv("DATABASE_NAME", "user_crawler")
 COLLECTION_NAME = "users"
 
+# Freelancer API configuration
+FREELANCER_API_BASE = os.getenv("FREELANCER_API_BASE", "https://www.freelancer.com/api/users/0.1/users")
+FREELANCER_OAUTH_TOKEN = os.getenv("FREELANCER_OAUTH_TOKEN", "")
+FREELANCER_CLIENT_ID = os.getenv("FREELANCER_CLIENT_ID", "")
+
 try:
     client = MongoClient(MONGODB_URL)
     db = client[DATABASE_NAME]
@@ -53,9 +58,6 @@ try:
 except Exception as e:
     logger.error(f"Failed to connect to MongoDB: {e}")
     raise
-
-# Freelancer API base URL
-FREELANCER_API_BASE = "https://www.freelancer.com/api/users/0.1/users"
 
 class QueuedUserService:
     
@@ -80,38 +82,69 @@ class QueuedUserService:
     async def get_user_from_freelancer_api(user_id: int) -> Optional[UserInfo]:
         """Get user info from Freelancer API"""
         try:
+            # Check if authentication is configured
+            if not FREELANCER_OAUTH_TOKEN and not FREELANCER_CLIENT_ID:
+                logger.error("Freelancer API authentication not configured. Please set FREELANCER_OAUTH_TOKEN or FREELANCER_CLIENT_ID in your .env file")
+                return None
+            
+            # Prepare headers for authentication
+            headers = {}
+            if FREELANCER_OAUTH_TOKEN:
+                # OAuth token authentication (preferred method)
+                headers["Authorization"] = f"Bearer {FREELANCER_OAUTH_TOKEN}"
+                headers["freelancer-oauth-v1"] = FREELANCER_OAUTH_TOKEN
+            elif FREELANCER_CLIENT_ID:
+                # Client ID authentication (alternative method)
+                headers["Freelancer-Developer-OAuth-Client-Id"] = FREELANCER_CLIENT_ID
+            
             async with httpx.AsyncClient(timeout=30.0) as client:
                 url = f"{FREELANCER_API_BASE}/{user_id}"
-                response = await client.get(url)
+                logger.debug(f"Making API request to: {url}")
+                response = await client.get(url, headers=headers)
                 
-                if response.status_code == 200:
+                if response.status_code == 401:
+                    logger.error(f"Authentication failed for Freelancer API. Check your OAuth token or Client ID")
+                    return None
+                elif response.status_code == 403:
+                    logger.error(f"Access forbidden for user {user_id}. Check API permissions or rate limits")
+                    return None
+                elif response.status_code == 404:
+                    logger.warning(f"User {user_id} not found on Freelancer")
+                    return None
+                elif response.status_code == 429:
+                    logger.warning(f"Rate limit exceeded for Freelancer API")
+                    return None
+                elif response.status_code == 200:
                     data = response.json()
+                    logger.debug(f"API response for user {user_id}: {data}")
                     
                     # Extract user info from API response
-                    if "result" in data and "users" in data["result"]:
-                        users = data["result"]["users"]
-                        if users and len(users) > 0:
-                            user_data = users[0]
-                            
-                            # Extract username and country
-                            username = user_data.get("username", "")
-                            
-                            # Country can be in different places in the response
-                            country = ""
-                            if "location" in user_data and "country" in user_data["location"]:
-                                country = user_data["location"]["country"].get("name", "")
-                            elif "country" in user_data:
-                                country = user_data["country"].get("name", "")
-                            
-                            return UserInfo(
-                                user_id=user_id,
-                                username=username,
-                                country=country,
-                                created_at=datetime.utcnow()
-                            )
-                
-                logger.warning(f"Failed to get user {user_id} from Freelancer API: Status {response.status_code}")
-                return None
+                    # Freelancer API returns: {"status": "success", "result": {...user_data...}}
+                    if "result" in data and data["result"]:
+                        user_data = data["result"]
+                        
+                        # Extract username and country
+                        username = user_data.get("username", "")
+                        
+                        # Extract country from location
+                        country = ""
+                        if "location" in user_data and user_data["location"]:
+                            location = user_data["location"]
+                            if "country" in location and location["country"]:
+                                country = location["country"].get("name", "")
+                        
+                        return UserInfo(
+                            user_id=user_id,
+                            username=username,
+                            country=country,
+                            created_at=datetime.utcnow()
+                        )
+                    else:
+                        logger.warning(f"Unexpected API response structure for user {user_id}")
+                        return None
+                else:
+                    logger.warning(f"Failed to get user {user_id} from Freelancer API: Status {response.status_code}, Response: {response.text}")
+                    return None
                 
         except httpx.TimeoutException:
             logger.error(f"Timeout when fetching user {user_id} from Freelancer API")
